@@ -1,0 +1,74 @@
+import cv2
+import numpy as np
+import face_recognition
+import os
+from datetime import datetime
+
+# Step 1: Load known faces
+path = 'known_faces'
+images = []
+names = []
+
+for filename in os.listdir(path):
+    img = cv2.imread(f'{path}/{filename}')
+    images.append(img)
+    names.append(os.path.splitext(filename)[0])  # Remove .jpg extension
+
+# Step 2: Encode known faces
+def find_encodings(images):
+    encodings = []
+    for img in images:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        enc = face_recognition.face_encodings(img)
+        if enc:
+            encodings.append(enc[0])
+    return encodings
+
+known_encodings = find_encodings(images)
+
+# Step 3: Mark attendance
+def mark_attendance(name):
+    with open('attendance.csv', 'a+') as f:
+        f.seek(0)
+        lines = f.readlines()
+        names_logged = [line.split(',')[0] for line in lines]
+
+        if name not in names_logged:
+            now = datetime.now()
+            time_string = now.strftime('%H:%M:%S')
+            f.write(f'{name},{time_string}\n')
+
+# Step 4: Open webcam and detect faces
+cap = cv2.VideoCapture(0)
+
+while True:
+    success, img = cap.read()
+    if not success:
+        break
+
+    # Resize and convert to RGB
+    small_img = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
+    small_img = cv2.cvtColor(small_img, cv2.COLOR_BGR2RGB)
+
+    faces_in_frame = face_recognition.face_locations(small_img)
+    encodings_in_frame = face_recognition.face_encodings(small_img, faces_in_frame)
+
+    for encode_face, face_loc in zip(encodings_in_frame, faces_in_frame):
+        matches = face_recognition.compare_faces(known_encodings, encode_face)
+        face_dist = face_recognition.face_distance(known_encodings, encode_face)
+
+        best_match_index = np.argmin(face_dist)
+
+        if matches[best_match_index]:
+            name = names[best_match_index].capitalize()
+            y1, x2, y2, x1 = [val * 4 for val in face_loc]  # scale back up
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(img, name, (x1, y2 + 25), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            mark_attendance(name)
+
+    cv2.imshow('Face Recognition Attendance', img)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
